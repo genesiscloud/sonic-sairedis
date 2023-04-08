@@ -213,12 +213,15 @@ void NotificationProcessor::redisPutFdbEntryToAsicView(
  * function will return false.
  *
  * @param data FDB event notification data
+ * @param zero_invalid_addr_oid Whether to replace invalid OID attributes
+ * with zero instead of failing the check
  *
  * @return False if any of OID values is not present in local DB, otherwise
  * true.
  */
 bool NotificationProcessor::check_fdb_event_notification_data(
-        _In_ const sai_fdb_event_notification_data_t& data)
+        _Inout_ sai_fdb_event_notification_data_t& data,
+        _In_ bool zero_invalid_attr_oid)
 {
     SWSS_LOG_ENTER();
 
@@ -261,7 +264,7 @@ bool NotificationProcessor::check_fdb_event_notification_data(
 
     for (uint32_t i = 0; i < data.attr_count; i++)
     {
-        const sai_attribute_t& attr = data.attr[i];
+        sai_attribute_t& attr = data.attr[i];
 
         auto meta = sai_metadata_get_attr_metadata(SAI_OBJECT_TYPE_FDB_ENTRY, attr.id);
 
@@ -275,10 +278,17 @@ bool NotificationProcessor::check_fdb_event_notification_data(
         if (meta->attrvaluetype != SAI_ATTR_VALUE_TYPE_OBJECT_ID)
             continue;
 
-        if (!m_translator->checkRidExists(attr.value.oid, true))
-        {
-            SWSS_LOG_WARN("RID 0x%" PRIx64 " on %s is not present on local ASIC DB", attr.value.oid, meta->attridname);
+        if (m_translator->checkRidExists(attr.value.oid, true))
+            continue;
 
+        SWSS_LOG_WARN("RID 0x%" PRIx64 " on %s is not present on local ASIC DB", attr.value.oid, meta->attridname);
+
+        if (zero_invalid_attr_oid)
+        {
+            attr.value.oid = SAI_NULL_OBJECT_ID;
+        }
+        else
+        {
             result = false;
         }
     }
@@ -316,8 +326,11 @@ void NotificationProcessor::process_on_fdb_event(
     for (uint32_t i = 0; i < count; i++)
     {
         sai_fdb_event_notification_data_t *fdb = &data[i];
+        /* Bridge Port RID appears to be invalid for VXLAN-EVPN remote->local MAC moves,
+         * so zero it out and let fdborch figure it out based on the existing state. */
+        bool zero_invalid_attr_oid = (fdb->event_type == SAI_FDB_EVENT_AGED);
 
-        sendntf &= check_fdb_event_notification_data(*fdb);
+        sendntf &= check_fdb_event_notification_data(*fdb, zero_invalid_attr_oid);
 
         if (!sendntf)
         {
