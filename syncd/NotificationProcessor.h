@@ -56,7 +56,8 @@ namespace syncd
                     _In_ const sai_fdb_event_notification_data_t *fdb);
 
             bool check_fdb_event_notification_data(
-                    _In_ const sai_fdb_event_notification_data_t& data);
+                    _Inout_ sai_fdb_event_notification_data_t& data,
+                    _In_ bool zero_invalid_attr_oid);
 
             bool check_nat_event_notification_data(
                     _In_ const sai_nat_event_notification_data_t& data);
